@@ -1,231 +1,207 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="uk">
 <head>
-<meta charset="UTF-8" />
-<title>Auto Roulette • PREVIEW</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<title>Speed Roulette Simulator</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
-body{
-  margin:0;
-  background:#0b0f14;
-  color:#fff;
-  font-family:Arial, sans-serif;
-  text-align:center;
-}
-header{
-  padding:12px;
-  background:#121821;
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-}
-button{
-  padding:12px 18px;
-  border:none;
-  border-radius:10px;
-  font-weight:bold;
-  cursor:pointer;
-}
-.red{background:#c62828;color:#fff}
-.black{background:#000;color:#fff}
-.gray{background:#374151;color:#fff}
-.green{background:#2e7d32;color:#fff}
-.container{padding:10px}
-canvas{
-  background:#0b0f14;
-  border-radius:50%;
-}
-.spinning{filter:blur(3px)}
-.card{
-  background:#1a2230;
-  margin:10px auto;
-  padding:12px;
-  border-radius:12px;
-  max-width:420px;
-}
-.admin{display:none}
-.admin.active{display:block}
-#dealer{
-  margin-top:10px;
-  padding:10px;
-  background:#000;
-  border-radius:10px;
-}
-#dealer span{color:red;font-weight:bold}
-@media(max-width:768px){
-  canvas{width:100%!important;height:auto!important}
-}
+  body {
+    background: #000;
+    color: #fff;
+    font-family: Arial, sans-serif;
+    padding: 20px;
+  }
+  .red { color: red; font-weight: bold; }
+  .black { color: black; background: #ccc; padding: 2px 4px; border-radius: 4px; }
+  .green { color: #00ff66; font-weight: bold; }
+  .history {
+    max-height: 250px;
+    overflow-y: auto;
+    background: #111;
+    padding: 10px;
+    border: 1px solid #333;
+  }
+  #status {
+    font-weight: bold;
+    padding: 5px 12px;
+    border-radius: 6px;
+  }
+  canvas { background: #111; margin-top: 15px; }
 </style>
 </head>
 
 <body>
 
-<header>
-  <b>🎰 AUTO ROULETTE <small>PREVIEW</small></b>
-  <button class="gray" onclick="toggleAdmin()">ADMIN</button>
-</header>
+<h1>Speed Roulette</h1>
 
-<div class="container">
+<p>
+Стратегія:
+<select id="strategySelect">
+  <option value="martingale">Martingale</option>
+  <option value="anti">Anti-Martingale</option>
+  <option value="fibonacci">Fibonacci</option>
+  <option value="colorstreak">Color Streak</option>
+</select>
+</p>
 
-<div class="card">
-  Balance: <b id="balance">1000</b><br/>
-  Bet: <input id="bet" type="number" value="10" style="width:80px">
-</div>
+<p>Баланс: <strong><span id="balance">55000</span></strong></p>
 
-<div class="card">
-  <button class="red" onclick="setColor('red')">RED</button>
-  <button class="black" onclick="setColor('black')">BLACK</button>
-  <button class="green" onclick="spin()">▶ SPIN</button>
-</div>
+<p>
+Статус стратегії:
+<span id="status">СТАРТ</span>
+</p>
 
-<div class="card">
-  <canvas id="wheel" width="300" height="300"></canvas>
-  <div id="result">—</div>
-</div>
+<p>Раунди: <span id="rounds">0</span> |
+Виграші: <span id="wins">0</span> |
+Програші: <span id="losses">0</span></p>
 
-<div id="dealer" class="card">
-  <span>● LIVE</span><br/>
-  <div id="dealerText">Waiting for bets…</div>
-</div>
+<canvas id="balanceChart" width="800" height="280"></canvas>
 
-<div class="card">
-  <b>RTP</b>
-  <canvas id="rtpChart" width="300" height="120"></canvas>
-</div>
-
-<div class="card">
-  History:
-  <div id="history"></div>
-</div>
-
-<!-- ADMIN -->
-<div class="card admin" id="admin">
-  <h3>ADMIN PREVIEW</h3>
-  Target RTP:
-  <input id="targetRtp" type="number" value="96" style="width:60px"> %
-  <br/><br/>
-  Fake players online: <b>12</b><br/>
-  Jurisdiction: MGA (MOCK)<br/>
-</div>
-
-</div>
-
-<!-- SOUNDS -->
-<audio id="sndSpin" src="https://assets.mixkit.co/sfx/preview/mixkit-slot-machine-spin-1930.mp3"></audio>
-<audio id="sndWin" src="https://assets.mixkit.co/sfx/preview/mixkit-winning-notification-2018.mp3"></audio>
-<audio id="sndLose" src="https://assets.mixkit.co/sfx/preview/mixkit-arcade-retro-game-over-213.wav"></audio>
+<h3>Історія спінів</h3>
+<div class="history" id="history"></div>
 
 <script>
-/* GAME STATE */
-let balance=1000, betColor="red", spinning=false;
-let stats={bet:0,win:0,rtp:[]};
-let angle=0;
+// ---------------- CONFIG ----------------
+const startBalance = 1000;
+let balance = startBalance;
+let rounds = 0, wins = 0, losses = 0;
+const baseBet = 10;
+let currentBet = baseBet;
+let targetColor = "red";
+let lastColors = [];
+let balanceHistory = [balance];
 
-/* CANVAS */
-const ctx=document.getElementById("wheel").getContext("2d");
-const rtpCtx=document.getElementById("rtpChart").getContext("2d");
+// ---------------- ROULETTE ----------------
+function spinRoulette() {
+  const redNums = new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]);
+  let num = Math.floor(Math.random() * 37);
+  let color = num === 0 ? "green" : redNums.has(num) ? "red" : "black";
+  return { num, color };
+}
 
-function drawWheel(a){
-  const r=150,slice=2*Math.PI/37;
-  ctx.clearRect(0,0,300,300);
-  for(let i=0;i<37;i++){
-    ctx.beginPath();
-    ctx.moveTo(r,r);
-    ctx.arc(r,r,r,i*slice+a,(i+1)*slice+a);
-    ctx.fillStyle=i===0?"green":i%2?"red":"black";
-    ctx.fill();
+// ---------------- STRATEGIES ----------------
+function martingale(win) {
+  currentBet = win === false ? currentBet * 2 : baseBet;
+  targetColor = "red";
+}
+
+function antiMartingale(win) {
+  currentBet = win ? currentBet * 2 : baseBet;
+  targetColor = "red";
+}
+
+let fib = [baseBet, baseBet], fibIndex = 0;
+function fibonacci(win) {
+  if (win) fibIndex = Math.max(0, fibIndex - 2);
+  else {
+    fibIndex++;
+    if (fibIndex >= fib.length)
+      fib.push(fib[fib.length - 1] + fib[fib.length - 2]);
   }
-  ctx.fillStyle="white";
-  ctx.fillRect(r-5,0,10,20);
+  currentBet = fib[fibIndex];
+  targetColor = "red";
 }
 
-drawWheel(0);
+function colorStreak(color) {
+  lastColors.push(color);
+  if (lastColors.length > 5) lastColors.shift();
 
-/* GAME */
-function setColor(c){betColor=c;}
+  if (lastColors.slice(-3).every(c => c === "red")) targetColor = "black";
+  else if (lastColors.slice(-3).every(c => c === "black")) targetColor = "red";
+  else targetColor = "red";
 
-function spin(){
-  if(spinning||balance<+bet.value)return;
-  spinning=true;
-  balance-=+bet.value;
-  stats.bet+=+bet.value;
-  updateUI();
+  currentBet = baseBet;
+}
 
-  document.getElementById("sndSpin").play();
-  dealer("No more bets…");
+// ---------------- STATUS ----------------
+function updateStatus() {
+  const el = document.getElementById("status");
 
-  const number=Math.floor(Math.random()*37);
-  const target=10*Math.PI+(36-number)*(2*Math.PI/37);
-  const start=angle;
-  let t0=null;
-
-  document.getElementById("wheel").classList.add("spinning");
-
-  function easeOut(t){return 1-Math.pow(1-t,3);}
-
-  function anim(t){
-    if(!t0)t0=t;
-    const p=Math.min((t-t0)/4000,1);
-    angle=start+(target-start)*easeOut(p);
-    drawWheel(angle);
-    if(p<1)requestAnimationFrame(anim);
-    else finish(number);
+  if (balance > startBalance) {
+    el.textContent = "ВИЩЕ СТАРТУ";
+    el.style.color = "#00ff99";
+  } else if (balance < startBalance) {
+    el.textContent = "В МІНУСІ";
+    el.style.color = "#ff4d4d";
+  } else {
+    el.textContent = "РІВНО СТАРТ";
+    el.style.color = "#ffffff";
   }
-  requestAnimationFrame(anim);
 }
 
-function finish(n){
-  spinning=false;
-  document.getElementById("wheel").classList.remove("spinning");
-
-  const color=n===0?"green":n%2?"red":"black";
-  if(color===betColor){
-    balance+=+bet.value*2;
-    stats.win+=+bet.value*2;
-    document.getElementById("sndWin").play();
-    result.innerText="WIN "+n+" ("+color+")";
-    dealer("Winning number "+n);
-  }else{
-    document.getElementById("sndLose").play();
-    result.innerText="LOSE "+n+" ("+color+")";
-    dealer("Result "+n);
+// ---------------- CHART ----------------
+const chart = new Chart(
+  document.getElementById("balanceChart"),
+  {
+    type: "line",
+    data: {
+      labels: [0],
+      datasets: [
+        {
+          label: "Баланс",
+          data: balanceHistory,
+          borderColor: "cyan",
+          borderWidth: 2,
+          tension: 0.3
+        },
+        {
+          label: "Старт",
+          data: [startBalance],
+          borderColor: "#555",
+          borderDash: [6,6],
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      plugins: { legend: { labels: { color: "#fff" } } },
+      scales: {
+        x: { ticks: { color: "#fff" } },
+        y: { ticks: { color: "#fff" } }
+      }
+    }
   }
+);
 
-  stats.rtp.push(stats.win/stats.bet*100||0);
-  history.innerHTML="<span>"+n+"</span> "+history.innerHTML;
-  drawRtp();
-  updateUI();
+// ---------------- GAME LOOP ----------------
+function playRound() {
+  const strategy = document.getElementById("strategySelect").value;
+  const spin = spinRoulette();
+  const win = spin.color === targetColor;
+
+  balance += win ? currentBet : -currentBet;
+
+  if (strategy === "martingale") martingale(win);
+  if (strategy === "anti") antiMartingale(win);
+  if (strategy === "fibonacci") fibonacci(win);
+  if (strategy === "colorstreak") colorStreak(spin.color);
+
+  rounds++;
+  win ? wins++ : losses++;
+
+  balanceHistory.push(balance);
+  chart.data.labels.push(rounds);
+  chart.data.datasets[1].data.push(startBalance);
+  chart.update();
+
+  document.getElementById("balance").textContent = balance;
+  document.getElementById("rounds").textContent = rounds;
+  document.getElementById("wins").textContent = wins;
+  document.getElementById("losses").textContent = losses;
+
+  updateStatus();
+
+  const h = document.createElement("div");
+  h.innerHTML = `#${rounds} → <span class="${spin.color}">${spin.num}</span> | ставка ${currentBet} | ${win ? "WIN" : "LOSE"}`;
+  document.getElementById("history").prepend(h);
+
+  setTimeout(playRound, 27000 + Math.random() * 5000);
 }
 
-function updateUI(){
-  balanceEl.innerText=balance;
-}
-
-/* RTP GRAPH */
-function drawRtp(){
-  rtpCtx.clearRect(0,0,300,120);
-  rtpCtx.beginPath();
-  stats.rtp.forEach((v,i)=>{
-    const x=i*(300/stats.rtp.length);
-    const y=120-v;
-    i?rtpCtx.lineTo(x,y):rtpCtx.moveTo(x,y);
-  });
-  rtpCtx.strokeStyle="#4cff4c";
-  rtpCtx.stroke();
-}
-
-/* LIVE DEALER TEXT */
-function dealer(t){
-  dealerText.innerText=t;
-}
-
-/* ADMIN */
-function toggleAdmin(){
-  admin.classList.toggle("active");
-}
-
-const balanceEl=document.getElementById("balance");
+// ---------------- START ----------------
+updateStatus();
+playRound();
 </script>
 
 </body>
